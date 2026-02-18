@@ -1,53 +1,62 @@
 # FastAPI Reverse Proxy
 
-A robust, streaming-capable reverse proxy for FastAPI including support for WebSockets and Server-Sent Events (SSE).
+A robust, streaming-capable reverse proxy for FastAPI/Starlette with built-in **Latency-Based Load Balancing** and **Active Health Monitoring**.
 
 ## Features
 
-- **Streaming Support**: Efficiently handles large file uploads and downloads.
-- **SSE Compatible**: Ready for Server-Sent Events (perfect for LLM applications like Open WebUI).
-- **WebSocket Forwarding**: Bidirectional proxying of WebSocket connections.
-- **Memory Efficient**: Uses `httpx` and FastAPI's streaming response to keep memory usage flat.
-- **Connection Pooling**: Reuses client connections for maximum performance.
+- **Streaming Ready**: Efficiently handles SSE (Server-Sent Events) and large file uploads/downloads.
+- **WebSocket Support**: Seamless bidirectional tunneling for real-time applications.
+- **Unified Load Balancing**: Single class for both Round-Robin and Smart routing.
+- **Latency-Based Routing**: Automatically routes traffic to the fastest healthy server (HEAD probe).
+- **Graceful Failover**: Returns 503 Service Unavailable when no healthy backends are available.
+- **Framework Agnostic**: Works with FastAPI and Starlette out of the box.
 
 ## Quick Start
 
-### 1. Initialize the Client
-In your FastAPI app, use the `lifespan` event to manage the connection pool:
+```python
+from fastapi import FastAPI, Request
+from fastapi_reverse_proxy import proxy_pass, HealthChecker, LoadBalancer
+
+app = FastAPI()
+
+# 1. Setup health monitoring (Optional but recommended)
+checker = HealthChecker(["http://localhost:8080", "http://localhost:8081"])
+# 2. Setup the balancer
+lb = LoadBalancer(checker)
+
+@app.api_route("/{path:path}", methods=["GET", "POST", "PUT", "DELETE"])
+async def gateway(request: Request):
+    # Pass the LoadBalancer directly!
+    return await proxy_pass(request, lb)
+```
+
+## Core Components
+
+### 1. HealthChecker
+Monitors a list of target URLs in the background. It measures latency in milliseconds and tracks uptime.
+
+- **Initialization**: `HealthChecker(targets, interval=10, timeout=10)`
+- **`get_fastest()`**: Returns the URL with the lowest response time.
+- **Lifecycle**: Use `async with checker:` or manual `start()`/`destroy()`.
+
+### 2. LoadBalancer
+The decision maker. It has two modes based on what you pass to the constructor:
+
+- **Round-Robin Mode**: Pass a `list[str]`. It cycles through servers sequentially.
+- **Latency Mode**: Pass a `HealthChecker` object. It always picks the fastest healthy target.
 
 ```python
-from fastapi import FastAPI
-from contextlib import asynccontextmanager
-from proxy_httpx import create_httpx_client, close_httpx_client
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    await create_httpx_client(app)
-    yield
-    await close_httpx_client(app)
-
-app = FastAPI(lifespan=lifespan)
+lb = LoadBalancer(["http://a", "http://b"]) # Mode: Round-Robin
+lb = LoadBalancer(checker)                  # Mode: Latency-Based
 ```
 
-### 2. Setup the Proxy Route
-```python
-from fastapi import Request, WebSocket
-from proxy_pass import proxy_pass, proxy_pass_websocket
+## Advanced Example
 
-@app.api_route("/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"])
-async def http_proxy(request: Request, path: str):
-    return await proxy_pass(request, "http://localhost:8080")
-
-@app.websocket("/{path:path}")
-async def ws_proxy(websocket: WebSocket, path: str):
-    await proxy_pass_websocket(websocket, "ws://localhost:8080")
-```
-
-## Installation
-
-```bash
-pip install fastapi-reverse-proxy
-```
+See `example.py` for a full implementation including:
+- Proper `lifespan` management.
+- Shared `httpx.AsyncClient` for performance.
+- WebSocket proxying with load balancing.
 
 ## License
+
 MIT
