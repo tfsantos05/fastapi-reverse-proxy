@@ -1,5 +1,5 @@
 from health_check import HealthChecker
-from fastapi import Request, Response
+from fastapi import Request, Response, WebSocket
 from urllib.parse import urlparse
 from typing import Dict, Optional
 import asyncio, logging
@@ -28,8 +28,6 @@ class LoadBalancer:
         self._limits_map: Dict[str, Optional[int]] = {}
         self._global_max_requests: Optional[int] = None
         
-        self._destroyed = False
-        
         if self.__healthMode:
              # Populate initial limits if targets were dictionaries (Manual mode)
              for host in self.servers.targets:
@@ -37,25 +35,6 @@ class LoadBalancer:
                  config = self.servers.target_configs.get(host, {})
                  self._limits_map[host] = config.get("maxrequests")
                  
-    def __del__(self):
-        """
-        Class-built function for deletion
-        
-        WARNING: This one is last resort! Consider using .destroy() before exiting instead !
-        Complete GC of this class is NOT guaranteed
-        """
-        if not self._destroyed and isinstance(self.servers, HealthChecker):
-            try:
-                logger.warning("You did not call .destroy() . Attempting cleanup via __del__ ... \n(Don't forget to add .destroy() at the end of your program)")
-                loop = asyncio.get_running_loop()
-                if loop.is_running():
-                    loop.create_task(self.destroy())
-            except RuntimeError:
-                pass
-            
-    async def __aexit__(self, *args):
-        await self.destroy()
-
     @property
     def max_requests(self) -> Optional[int]:
         if self.__healthMode and self.servers.is_personalized:
@@ -95,10 +74,6 @@ class LoadBalancer:
             return None
         
         return min(available, key=lambda t: available[t])
-    
-    def destroy(self):
-        if isinstance(self.servers, HealthChecker): self.servers.destroy()
-
     def peek(self) -> str | None:
         if self.__healthMode:
             return self._get_best_healthy()
@@ -130,7 +105,17 @@ class LoadBalancer:
             raise IndexError("Index out of range")
         self.__index = index
 
-    async def proxy_pass(self, req: Request, path: str, timeout: float = 60.0):
+    async def proxy_pass(
+        self, 
+        req: Request, 
+        path: str, 
+        timeout: float = 60.0, 
+        forward_query: bool = True,
+        additional_headers: Optional[dict] = None,
+        override_headers: Optional[dict] = None,
+        override_body: Optional[bytes] = None,
+        method: Optional[str] = None
+    ):
         from proxy_pass import proxy_pass as _proxy_pass  # Late import
         
         target = self.get()
@@ -139,11 +124,29 @@ class LoadBalancer:
             
         u = urlparse(target)
         origin = f"{u.scheme}://{u.netloc}"
-        dest_base = f"{origin.rstrip('/')}/{path.lstrip('/')}"
+        # Smart pathing: combine origin and user-provided path
+        dest_url = f"{origin.rstrip('/')}/{path.lstrip('/')}"
         
-        return await _proxy_pass(req, dest_base, timeout=timeout)
+        return await _proxy_pass(
+            req, 
+            dest_url, 
+            timeout=timeout, 
+            forward_query=forward_query,
+            additional_headers=additional_headers,
+            override_headers=override_headers,
+            override_body=override_body,
+            method=method
+        )
 
-    async def proxy_pass_websocket(self, websocket, path: str, subprotocols: list[str] | None = None):
+    async def proxy_pass_websocket(
+        self, 
+        websocket: WebSocket, 
+        path: str, 
+        subprotocols: list[str] | None = None, 
+        forward_query: bool = True,
+        additional_headers: Optional[dict] = None,
+        override_headers: Optional[dict] = None
+    ):
         from proxy_pass import proxy_pass_websocket as _proxy_pass_ws  # Late import
         
         target = self.get()
@@ -153,6 +156,15 @@ class LoadBalancer:
 
         u = urlparse(target)
         origin = f"{u.scheme}://{u.netloc}"
-        dest_base = f"{origin.rstrip('/')}/{path.lstrip('/')}"
-        
-        return await _proxy_pass_ws(websocket, dest_base, subprotocols=subprotocols)
+        # Smart pathing: combine origin and user-provided path
+        dest_url = f"{origin.rstrip('/')}/{path.lstrip('/')}"
+
+        return await _proxy_pass_ws(
+            websocket, 
+            dest_url, 
+            subprotocols=subprotocols, 
+            forward_query=forward_query,
+            additional_headers=additional_headers,
+            override_headers=override_headers
+        )
+
