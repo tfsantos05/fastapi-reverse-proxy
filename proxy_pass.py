@@ -6,8 +6,6 @@ import asyncio
 import logging
 from typing import Optional
 from proxy_httpx import get_httpx_client
-from load_balance import LoadBalancer
-from health_check import HealthChecker
 
 logger = logging.getLogger("fastapi_reverse_proxy")
 
@@ -18,25 +16,14 @@ EXCLUDED_HEADERS = {
     "proxy-authorization", "te", "trailers", "transfer-encoding", "upgrade"
 }
 
-async def proxy_pass(request: Request, target: str | LoadBalancer | HealthChecker, timeout: float = 60.0):
+async def proxy_pass(request: Request, target_url: str, timeout: float = 60.0):
     """
     Forwards incoming HTTP requests to the target service using streaming.
     Robustly handles SSE (Server-Sent Events) and large payloads.
     """
-
-    if isinstance(target, str): target_url = target
-    elif isinstance(target, LoadBalancer): target_url = target.get()
-    elif isinstance(target, HealthChecker): target_url = target.get_fastest()
-    else: raise TypeError("Target must be a string, LoadBalancer, or HealthChecker")
-
-    # If all servers are down, return a clean 503 instead of trying to hit "http://None/..."
-    if target_url is None:
-        logger.error("Proxy target is None (check LoadBalancer/HealthChecker status)")
-        return Response("Service Unavailable: No healthy backends", status_code=503)
-
     url = f"{target_url.rstrip('/')}{request.url.path}"
-    if request.query_params:
-        url = f"{url}?{request.query_params}"
+    if request.url.query:
+        url = f"{url}?{request.url.query}"
 
     # Prepare headers for the upstream request
     headers = dict(request.headers)
