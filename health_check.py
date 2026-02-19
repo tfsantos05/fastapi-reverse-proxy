@@ -9,7 +9,7 @@ logger = logging.getLogger("fastapi_reverse_proxy")
 
 
 class HealthChecker:
-    def __init__(self, targets: list[str] | list[dict], interval: int = 10, timeout: int = 10, autostart: bool = True, httpx_client: httpx.AsyncClient | None = None):
+    def __init__(self, targets: list[str] | list[dict], interval: int = 10, timeout: int = 10, httpx_client: httpx.AsyncClient | None = None):
         if not targets:
             raise ValueError("Targets list cannot be empty")
         if interval < 1:
@@ -55,13 +55,7 @@ class HealthChecker:
         self.status: Dict[str, Union[float, bool]] = {host: 0.0 for host in self.targets}
         self.last_update: float = time.perf_counter()
 
-        # Autostart: schedule the loop if a running event loop exists
         self._task: Optional[asyncio.Task] = None
-        if autostart:
-            try:
-                self._task = asyncio.create_task(self._loop())
-            except RuntimeError:
-                pass  # No running event loop yet — call start() manually
 
         # Track if WE created the client so we know if we should close it
         self._owns_client = httpx_client is None
@@ -123,6 +117,7 @@ class HealthChecker:
     async def start(self):
         """Start the background health check loop."""
         if not self._task:
+            await self.check_all() # Perform a check right on start
             self._task = asyncio.create_task(self._loop())
 
     async def __aenter__(self):
