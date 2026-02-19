@@ -5,6 +5,7 @@ import httpx
 import websockets
 import asyncio
 import logging
+import inspect
 from typing import Optional
 from proxy_httpx import get_httpx_client
 
@@ -99,35 +100,44 @@ async def proxy_pass(
         # Send the request and stream the response
         rp_resp = await client.send(rp_req, stream=True)
 
-        # Filter response headers
-        resp_headers = {}
-        for k, v in rp_resp.headers.items():
-            if k.lower() in EXCLUDED_HEADERS:
-                continue
-            if k.lower() == "content-encoding":
-                continue
-            if k.lower() == "content-length":
-                continue
-            resp_headers[k] = v
-        
-        resp_headers["X-Accel-Buffering"] = "no"
-        resp_headers["Cache-Control"] = "no-cache"
+        try:
+            # Filter response headers
+            resp_headers = {}
+            for k, v in rp_resp.headers.items():
+                if k.lower() in EXCLUDED_HEADERS:
+                    continue
+                if k.lower() == "content-encoding":
+                    continue
+                if k.lower() == "content-length":
+                    continue
+                resp_headers[k] = v
+            
+            resp_headers["X-Accel-Buffering"] = "no"
+            resp_headers["Cache-Control"] = "no-cache"
 
-        async def cleanup():
+            async def cleanup():
+                await rp_resp.aclose()
+                if not is_global_client:
+                    await client.aclose()
+
+            return StreamingResponse(
+                rp_resp.aiter_bytes(),
+                status_code=rp_resp.status_code,
+                headers=resp_headers,
+                background=BackgroundTask(cleanup)
+            )
+        except BaseException as e:
+            # If we fail here, the ownership hasn't passed to StreamingResponse yet
             await rp_resp.aclose()
-            if not is_global_client:
-                await client.aclose()
-
-        return StreamingResponse(
-            rp_resp.aiter_bytes(),
-            status_code=rp_resp.status_code,
-            headers=resp_headers,
-            background=BackgroundTask(cleanup)
-        )
-    except Exception as e:
+            raise e
+            
+    except BaseException as e:
+        # Catch EVERY exception (including CancelledError) for local client cleanup
         if not is_global_client and client:
             await client.aclose()
+        # Re-raise so the server can handle the cancellation/error
         raise e
+
 
 
 async def proxy_pass_websocket(
@@ -172,28 +182,32 @@ async def proxy_pass_websocket(
     supported_subprotocols = subprotocols or websocket.scope.get("subprotocols")
 
     try:
-        # Try new API (websockets 12.0+)
-        async with websockets.connect(url, additional_headers=headers, subprotocols=supported_subprotocols) as target_ws:
+        # Determine the correct header parameter name for this version of websockets
+        # Modern (12.0+): additional_headers, Legacy: extra_headers
+        _params = inspect.signature(websockets.connect).parameters
+        header_param = "additional_headers" if "additional_headers" in _params else "extra_headers"
+        
+        connect_kwargs = {
+            header_param: headers,
+            "subprotocols": supported_subprotocols
+        }
+
+        async with websockets.connect(url, **connect_kwargs) as target_ws:
             # Accept once we know the negotiated subprotocol
             await websocket.accept(subprotocol=target_ws.subprotocol)
             await _handle_ws_bidirectional(websocket, target_ws)
-    except TypeError as e:
-        if "additional_headers" in str(e):
-            # Fallback to legacy API
-            async with websockets.connect(url, extra_headers=headers, subprotocols=supported_subprotocols) as target_ws:
-                await websocket.accept(subprotocol=target_ws.subprotocol)
-                await _handle_ws_bidirectional(websocket, target_ws)
-        else:
-            logger.error(f"WebSocket Connect Error: {e}")
-            raise e
-    except Exception as e:
-        logger.error(f"WebSocket Proxy Error: {e}")
+
+    except BaseException as e:
+        if not isinstance(e, asyncio.CancelledError):
+            logger.error(f"WebSocket Proxy Error: {e}")
         raise e
     finally:
         try:
             await websocket.close()
-        except:
+        except Exception:
             pass
+
+
 
 
 
@@ -210,7 +224,8 @@ async def _handle_ws_bidirectional(websocket: WebSocket, target_ws):
                         await target_ws.send(message["bytes"])
                 elif message["type"] == "websocket.disconnect":
                     break
-        except Exception:
+        except (Exception, asyncio.CancelledError):
+            # Exit loop on error or cancellation
             pass
 
     async def target_to_client():
@@ -221,7 +236,8 @@ async def _handle_ws_bidirectional(websocket: WebSocket, target_ws):
                     await websocket.send_text(message)
                 else:
                     await websocket.send_bytes(message)
-        except Exception:
+        except (Exception, asyncio.CancelledError, websockets.ConnectionClosed):
+            # Exit loop on error, closure, or cancellation
             pass
 
     # Wrap in tasks for cancellation
@@ -231,11 +247,10 @@ async def _handle_ws_bidirectional(websocket: WebSocket, target_ws):
     ]
     
     try:
-        done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+        await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
     finally:
         for task in tasks:
             if not task.done():
                 task.cancel()
-        # Optionally wait for cancellation to complete
+        # Ensure all tasks are gathered and exceptions (including CancelledError) are handled
         await asyncio.gather(*tasks, return_exceptions=True)
-
