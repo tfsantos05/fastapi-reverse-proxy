@@ -20,8 +20,7 @@ The recommended way to use the library is within a FastAPI **lifespan** handler.
 from fastapi import FastAPI, Request, WebSocket
 from contextlib import asynccontextmanager
 
-# Local import assuming library is in the current directory
-from __init__ import (
+from fastapi_reverse_proxy import (
      HealthChecker, LoadBalancer, 
      create_httpx_client, close_httpx_client
 )
