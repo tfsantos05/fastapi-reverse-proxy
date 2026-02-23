@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "fastapi-reverse-proxy"
 version = "0.1.0"
 authors = [
-  { name="Tomás", email="your.email@example.com" },
+  { name="Tomás", email="tomas@suricatingss.xyz" },
 ]
 description = "A robust, streaming-capable reverse proxy for FastAPI including WebSocket support."
 readme = "README.md"
@@ -19,10 +19,16 @@ classifiers = [
     "Topic :: Internet :: Proxy Servers",
 ]
 dependencies = [
-    "fastapi>=0.100.0",
-    "httpx>=0.24.0",
-    "websockets>=11.0",
+  "fastapi>=0.129.0",
+  "httpx>=0.28.1",
+  "starlette>=0.52.1",
+  "uvicorn>=0.41.0",
+  "anyio>=4.12.1",
+  "certifi>=2026.1.4",
+  "pydantic>=2.12.5",
+  "url-normalize>=2.2.1",
+  "typing_extensions>=4.15.0",
 ]
 
-[tool.setuptools]
-py-modules = ["proxy_pass", "proxy_httpx"]
+[tool.setuptools.packages.find]
+where = ["src"]
