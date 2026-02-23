@@ -28,6 +28,7 @@ dependencies = [
   "pydantic>=2.12.5",
   "url-normalize>=2.2.1",
   "typing_extensions>=4.15.0",
+  "websockets>=16.0"
 ]
 
 [tool.setuptools.packages.find]
