@@ -1,6 +1,7 @@
 from fastapi import Request, WebSocket, Response
 from fastapi.responses import StreamingResponse
 from starlette.background import BackgroundTask
+from url_normalize import url_normalize
 import httpx
 import websockets
 import asyncio
@@ -20,7 +21,8 @@ EXCLUDED_HEADERS = {
 
 async def proxy_pass(
     request: Request, 
-    target_url: str, 
+    host: str,
+    path: Optional[str] = None,
     timeout: float = 60.0, 
     forward_query: bool = True,
     additional_headers: Optional[dict] = None,
@@ -30,17 +32,26 @@ async def proxy_pass(
 ):
     """
     Forwards incoming HTTP requests to the target service using streaming.
-    - target_url: The full destination URL (including path).
+    - host: The host itself (without ending slash)
+    - path: The path with beggining slash
     - forward_query: If True, automatically appends the request's query string.
     - additional_headers: Headers to add to the upstream request.
     - override_headers: Use these headers instead of original request headers.
     - override_body: Use this body instead of streaming the request body.
     - method: HTTP method to use (e.g., 'POST'). Defaults to original request method.
     """
-    url = target_url
+    
+    if path is None: path = request.url.path # set to path
+    
+    # normalize host + path
+    url = url_normalize(host + path, default_scheme="http")
+    
     if forward_query and request.url.query:
         url = f"{url}?{request.url.query}" if "?" not in url else f"{url}&{request.url.query}"
-
+        
+    # normalize again
+    url = url_normalize(url ,default_domain="http")
+    
     # Determine method
     final_method = method or request.method
 

@@ -3,6 +3,7 @@ from fastapi import Request, Response, WebSocket
 from urllib.parse import urlparse
 from typing import Dict, Optional
 import asyncio, logging
+from url_normalize import url_normalize
 
 logger = logging.getLogger("fastapi_reverse_proxy")
 
@@ -122,14 +123,15 @@ class LoadBalancer:
         if not target:
             return Response("Service Unavailable: No healthy backends available or all over limit", status_code=503)
             
-        u = urlparse(target)
-        origin = f"{u.scheme}://{u.netloc}"
+        #u = urlparse(target)
+        #origin = f"{u.scheme}://{u.netloc}"
         # Smart pathing: combine origin and user-provided path
-        dest_url = f"{origin.rstrip('/')}/{path.lstrip('/')}"
+        #dest_url = f"{origin.rstrip('/')}/{path.lstrip('/')}"
         
         return await _proxy_pass(
-            req, 
-            dest_url, 
+            request=req, 
+            host=url_normalize(target, default_scheme="http"),
+            path=path,
             timeout=timeout, 
             forward_query=forward_query,
             additional_headers=additional_headers,
@@ -141,7 +143,7 @@ class LoadBalancer:
     async def proxy_pass_websocket(
         self, 
         websocket: WebSocket, 
-        path: str, 
+        path: Optional[str] = None, 
         subprotocols: list[str] | None = None, 
         forward_query: bool = True,
         additional_headers: Optional[dict] = None,
@@ -156,8 +158,8 @@ class LoadBalancer:
 
         u = urlparse(target)
         origin = f"{u.scheme}://{u.netloc}"
-        # Smart pathing: combine origin and user-provided path
-        dest_url = f"{origin.rstrip('/')}/{path.lstrip('/')}"
+        # Smart pathing: combine origin and user-provided path (or default path)
+        dest_url = f"{origin.rstrip('/')}/{path.lstrip('/') if path is not None else websocket.url.path}"
 
         return await _proxy_pass_ws(
             websocket, 
