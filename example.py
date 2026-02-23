@@ -5,14 +5,15 @@ from contextlib import asynccontextmanager
 
 # Import your library components
 # We import from the package root (__init__.py)
-from __init__ import (
-    proxy_pass, 
-    proxy_pass_websocket, 
-    HealthChecker, 
-    LoadBalancer,
-    create_httpx_client, 
-    close_httpx_client
-)
+#from __init__ import (
+#    proxy_pass, 
+#   proxy_pass_websocket, 
+#    HealthChecker, 
+#    LoadBalancer,
+#    create_httpx_client, 
+#    close_httpx_client
+#)
+import fastapi_reverse_proxy as fproxy
 
 # 1. Configuration
 # List of backends to load balance. 
@@ -21,8 +22,8 @@ SIMPLE_BACKENDS = ["http://localhost:8081", "http://localhost:8082"]
 # Personalized backends with custom ping paths and request limits
 # This is a 'Manual' configuration for the HealthChecker
 PERSONALIZED_BACKENDS = [
-    {"host": "http://localhost:8083", "pingpath": "/healthz", "maxrequests": 50},
-    {"host": "http://localhost:8084", "pingpath": "/status", "maxrequests": 100},
+    {"host": "http://localhost:8083", "pingpath": "/", "maxrequests": 50},
+    {"host": "http://localhost:8084", "pingpath": "/", "maxrequests": 100},
 ]
 
 # 2. Components Setup
@@ -30,15 +31,15 @@ PERSONALIZED_BACKENDS = [
 # --- Health-Aware (Smart) Balancer ---
 # HealthChecker is the 'Active' component. It needs a lifecycle (async with).
 # It will ping backends every 10 seconds to measure latency and health.
-smart_checker = HealthChecker(PERSONALIZED_BACKENDS, interval=10)
+smart_checker = fproxy.HealthChecker(PERSONALIZED_BACKENDS, interval=10)
 
 # LoadBalancer is a 'Passive' utility. It picks the fastest healthy backend.
 # Because smart_checker uses personalized dicts, limits (maxrequests) are automatic.
-smart_lb = LoadBalancer(smart_checker)
+smart_lb = fproxy.LoadBalancer(smart_checker)
 
 # --- Standard Round-Robin Balancer ---
 # No background tasks needed for simple list-based balancing.
-simple_lb = LoadBalancer(SIMPLE_BACKENDS)
+simple_lb = fproxy.LoadBalancer(SIMPLE_BACKENDS)
 
 
 # 3. Lifecycle Management
@@ -46,7 +47,7 @@ simple_lb = LoadBalancer(SIMPLE_BACKENDS)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Initialize global HTTPX client for optimal performance across all proxy calls
-    await create_httpx_client(app)
+    await fproxy.create_httpx_client(app)
     
     # We use 'async with' on the HealthChecker to start the monitoring loop
     # and ensure it stops cleanly when the server shuts down.
@@ -56,7 +57,7 @@ async def lifespan(app: FastAPI):
         yield
     
     # Graceful shutdown of the global client
-    await close_httpx_client(app)
+    await fproxy.close_httpx_client(app)
 
 app = FastAPI(
     title="FastAPI Reverse Proxy Gateway",
@@ -91,7 +92,7 @@ async def override_demo(request: Request):
     """
     target_api = "http://localhost:8081/api/process"
     
-    return await proxy_pass(
+    return await fproxy.proxy_pass(
         request, 
         target_api,
         method="POST",                   # Force a POST even if this was a GET
