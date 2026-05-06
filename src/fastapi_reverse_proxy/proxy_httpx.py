@@ -1,7 +1,7 @@
 import httpx
 from fastapi import FastAPI, Request
 
-class httpxClient:
+class Proxy:
     def __init__(self, app: FastAPI):
         """Initializes the HTTP client and stores it in the app state."""
         self.__app = app # store the app as internal variable
