@@ -4,51 +4,50 @@ A robust, streaming-capable reverse proxy for FastAPI/Starlette with built-in **
 
 ## Features
 
-- **Streaming Ready**: Efficiently handles SSE (Server-Sent Events) and large file uploads/downloads.
+- **Async**: Async by default.
+- **Httpx Pool**: Async HTTPX Pool for proxying.
+- **Streaming Ready**: Handles SSE (Server-Sent Events) and large payloads (such as big files) while keeping RAM usage low.
 - **WebSocket Support**: Seamless bidirectional tunneling with automated subprotocol negotiation.
 - **Unified Load Balancing**: Standard Round-Robin or Smart routing using a single utility.
 - **Latency-Based Routing**: Automatically routes traffic to the fastest healthy server (HEAD probe).
 - **Advanced Overrides**: Granular control over headers, body, and HTTP methods.
-- **Robust Cancellation**: Specialized handling for `asyncio.CancelledError` to prevent resource leaks.
 - **Version Agnostic**: Automatically handles `websockets` library version differences (12.0+ vs Legacy).
 
-## Quick Start (Best Practice)
+## Quick Start
 
-The recommended way to use the library is within a FastAPI **lifespan** handler. This ensures all background monitoring tasks and HTTP clients start and stop cleanly.
+Use the **lifespan** handler as shown for an easy launch.
+
+The simplest way to use the proxy is to use **proxy_pass** and/or **proxy_pass_websocket** on the endpoints.
 
 ```python
 from fastapi import FastAPI, Request, WebSocket
 from contextlib import asynccontextmanager
 
-from fastapi_reverse_proxy import (
-     HealthChecker, LoadBalancer, 
-     create_httpx_client, close_httpx_client
-)
-
-# 1. Setup health monitoring and load balancing
-checker = HealthChecker(["http://localhost:8080", "http://localhost:8081"])
-lb = LoadBalancer(checker)
+from fastapi_reverse_proxy import Proxy, proxy_pass, proxy_pass_websocket
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Initialize global resources
-    await create_httpx_client(app)
-    async with checker: # Starts background health loop
+    async with Proxy(app):
         yield
-    await close_httpx_client(app)
 
 app = FastAPI(lifespan=lifespan)
 
-@app.api_route("/{path:path}", methods=["GET", "POST", "PUT", "DELETE"])
-async def gateway(request: Request, path: str):
-    # Route to the fastest healthy backend
-    return await lb.proxy_pass(request, path=f"/{path}")
+# catch-all route. recommended for a reverse proxy
+@app.api_route("/{path:path}", methods=["GET","POST","PUT","DELETE"]) # don't forget to add the methods.
+async def index(req: Request):
+    """
+    You always need to pass the "Request" object and to specify the host
+    If you don't add a path, it will be the same as the original (/login --> http://127.0.0.1/login)
+    """
+    return await proxy_pass(req, "http://127.0.0.1:8080")
 
-@app.websocket("/ws/{path:path}")
-async def ws_tunnel(websocket: WebSocket, path: str):
-    # Automatic subprotocol negotiation + Tunneling
-    await lb.proxy_pass_websocket(websocket, path=f"/{path}")
 ```
+
+## Advanced Examples:
+
+Check [example.py](example.py) for full examples, including
+- **Websocket Proxy**
+- **Socket.IO Proxy** 
 
 ## Advanced Proxying
 
