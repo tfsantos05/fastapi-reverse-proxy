@@ -158,12 +158,12 @@ class LoadBalancer:
 
         u = urlparse(target)
         origin = f"{u.scheme}://{u.netloc}"
-        # Smart pathing: combine origin and user-provided path (or default path)
-        dest_url = f"{origin.rstrip('/')}/{path.lstrip('/') if path is not None else websocket.url.path}"
+        
 
         return await _proxy_pass_ws(
             websocket, 
-            dest_url, 
+            host=origin,
+            path=path,
             subprotocols=subprotocols, 
             forward_query=forward_query,
             additional_headers=additional_headers,

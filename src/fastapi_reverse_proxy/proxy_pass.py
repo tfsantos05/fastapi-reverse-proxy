@@ -9,6 +9,7 @@ import logging
 import inspect
 from typing import Optional
 from .proxy_httpx import get_httpx_client
+from urllib.parse import urlparse
 
 logger = logging.getLogger("fastapi_reverse_proxy")
 
@@ -18,6 +19,11 @@ EXCLUDED_HEADERS = {
     "connection", "keep-alive", "proxy-authenticate", 
     "proxy-authorization", "te", "trailers", "transfer-encoding", "upgrade"
 }
+
+def url_normalize_ws(url:str):
+    u = urlparse(url)
+    return url_normalize(url.replace(u.scheme, "http", 1)).replace("http", u.scheme, 1)
+    
 
 async def proxy_pass(
     request: Request, 
@@ -168,7 +174,7 @@ async def proxy_pass_websocket(
     """
     
     if path is None: path = websocket.url.path
-    url = url_normalize(host + path, default_scheme="http")
+    url = url_normalize_ws(host + path)
     
     if forward_query and websocket.url.query:
         url = f"{url}?{websocket.url.query}" if "?" not in url else f"{url}&{websocket.url.query}"
