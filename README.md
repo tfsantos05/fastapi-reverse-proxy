@@ -45,7 +45,7 @@ async def index(req: Request):
 
 ## Advanced Examples:
 
-Check [example.py](example.py) for full examples, including
+Check [examples](https://github.com/tfsantos05/fastapi-reverse-proxy/blob/main/examples) for full examples, including
 - **Websocket Proxy**
 - **Socket.IO Proxy** 
 
