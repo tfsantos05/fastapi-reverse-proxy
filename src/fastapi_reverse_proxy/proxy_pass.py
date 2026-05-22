@@ -177,13 +177,15 @@ async def proxy_pass_websocket(
     subprotocols: Optional[list[str]] = None, 
     forward_query: bool = True,
     additional_headers: Optional[dict] = None,
-    override_headers: Optional[dict] = None
+    override_headers: Optional[dict] = None,
+    timeout: float = 10.0
 ):
     """
     Forwards incoming WebSocket connections to the target service.
     - host: The host itself (without ending slash)
     - path: The path with beggining slash (by default copies requests's path)
     - forward_query: If True, automatically appends the request's query string.
+    - timeout: Time to wait for the connection handshake (open_timeout).
     """
     
     if path is None: path = websocket.url.path
@@ -224,7 +226,8 @@ async def proxy_pass_websocket(
         
         connect_kwargs = {
             header_param: headers,
-            "subprotocols": supported_subprotocols
+            "subprotocols": supported_subprotocols,
+            "open_timeout": timeout
         }
 
         async with websockets.connect(url, **connect_kwargs) as target_ws:
@@ -234,16 +237,22 @@ async def proxy_pass_websocket(
 
     except BaseException as e:
         if not isinstance(e, asyncio.CancelledError):
-            logger.error(f"WebSocket Proxy Error: {e}")
+            # If the connection fails before accept(), we can raise a proper 502
+            if not websocket.client.connected: # Roughly checking if handshake finished
+                logger.error(f"WebSocket Connection Error: {e}")
+                # This is a bit tricky in WS, but if we haven't accepted yet, we can raise
+                try:
+                    raise HTTPException(status_code=502, detail="Bad Gateway: WebSocket connection failed")
+                except RuntimeError: # If already accepted, we can't raise HTTPException
+                    pass
+            else:
+                logger.error(f"WebSocket Proxy Error: {e}")
         raise e
     finally:
         try:
             await websocket.close()
         except Exception:
             pass
-
-
-
 
 
 async def _handle_ws_bidirectional(websocket: WebSocket, target_ws):
