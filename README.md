@@ -11,6 +11,8 @@ A robust, streaming-capable reverse proxy for FastAPI/Starlette with built-in **
 - **Unified Load Balancing**: Standard Round-Robin or Smart routing using a single utility.
 - **Latency-Based Routing**: Automatically routes traffic to the fastest healthy server (HEAD probe).
 - **Advanced Overrides**: Granular control over headers, body, and HTTP methods.
+- **Smart Error Mapping**: Automatically converts upstream connection failures into standard HTTP 502 (Bad Gateway) and 504 (Gateway Timeout) responses.
+- **Resilient Handshakes**: Customizable `open_timeout` for WebSockets to prevent proxy hangs during backend connection attempts.
 - **Version Agnostic**: Automatically handles `websockets` library version differences (12.0+ vs Legacy).
 
 ## Quick Start
@@ -43,11 +45,20 @@ async def index(req: Request):
 
 ```
 
+## 🛡️ Resilience & Error Handling
+
+Error Handlingfastapi-reverse-proxy transforms upstream crashes into meaningful HTTPException responses (e.g., 502 Bad Gateway or 504 Gateway Timeout). 
+
+This allows you to implement custom failover logic, retry mechanisms, or specific error pages.
+
+For a full implementation of a primary-to-backup failover system, see the [example](https://github.com/tfsantos05/fastapi-reverse-proxy/tree/main/examples/02_http_errors.py).
+
 ## Advanced Examples:
 
-Check [examples](https://github.com/tfsantos05/fastapi-reverse-proxy/blob/main/examples) for full examples, including
+Check [examples](https://github.com/tfsantos05/fastapi-reverse-proxy/tree/main/examples) for full examples, including:
 - **Websocket Proxy**
 - **Socket.IO Proxy** 
+- **Error Handling & Failover** (`examples/error_handling_example.py`)
 
 ## Advanced Proxying
 
@@ -55,6 +66,7 @@ The `proxy_pass` function and `LoadBalancer.proxy_pass` provide deep customizati
 
 | Parameter | Type | Description |
 | :--- | :--- | :--- |
+| `timeout` | `float` | Total request timeout in seconds (Default: `60.0`). |
 | `method` | `str` | Force a specific HTTP method (e.g., `"POST"`). |
 | `override_body` | `bytes` | Send custom data instead of the incoming request body. |
 | `additional_headers` | `dict` | Append custom headers to the proxied request. |
@@ -90,6 +102,7 @@ The library implements "deferred negotiation" for WebSockets:
 2. It establishes an upstream connection first.
 3. Once the upstream accepts a protocol, the proxy calls `websocket.accept(subprotocol=...)` back to the client.
 4. This ensures the entire tunnel (Client <-> Proxy <-> Upstream) uses the same negotiated protocol.
+5. **Handshake Timeout**: Supports a customizable `timeout` parameter (default `10.0s`) to prevent hangs if the backend is unresponsive.
 
 ## Robustness & Safety
 
