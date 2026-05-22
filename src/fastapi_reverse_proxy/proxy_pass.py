@@ -1,4 +1,4 @@
-from fastapi import Request, WebSocket, Response
+from fastapi import Request, WebSocket, Response, HTTPException
 from fastapi.responses import StreamingResponse
 from starlette.background import BackgroundTask
 from url_normalize import url_normalize
@@ -23,8 +23,18 @@ EXCLUDED_HEADERS = {
 def url_normalize_ws(url:str):
     u = urlparse(url)
     return url_normalize(url.replace(u.scheme, "http", 1)).replace("http", u.scheme, 1)
-    
 
+async def handle_proxy_exception(e: Exception):
+    """Maps internal exceptions to FastAPI HTTPExceptions for the client."""
+    if isinstance(e, httpx.ConnectTimeout):
+        raise HTTPException(status_code=504, detail="Gateway Timeout")
+    if isinstance(e, (httpx.ConnectError, httpx.RemoteProtocolError)):
+        raise HTTPException(status_code=502, detail="Bad Gateway")
+    if isinstance(e, httpx.ReadTimeout):
+        raise HTTPException(status_code=504, detail="Upstream Read Timeout")
+    # Re-raise other exceptions (like CancelledError or internal bugs) to avoid masking
+    raise e
+    
 async def proxy_pass(
     request: Request, 
     host: str,
@@ -152,9 +162,12 @@ async def proxy_pass(
         # Catch EVERY exception (including CancelledError) for local client cleanup
         if not is_global_client and client:
             await client.aclose()
-        # Re-raise so the server can handle the cancellation/error
+        
+        # Transform httpx errors into proper HTTP responses
+        if not isinstance(e, asyncio.CancelledError):
+            await handle_proxy_exception(e)
+            
         raise e
-
 
 
 async def proxy_pass_websocket(
