@@ -44,7 +44,8 @@ async def proxy_pass(
     additional_headers: Optional[dict] = None,
     override_headers: Optional[dict] = None,
     override_body: Optional[bytes] = None,
-    method: Optional[str] = None
+    method: Optional[str] = None,
+    override_host: Optional[str] = None
 ):
     """
     Forwards incoming HTTP requests to the target service using streaming.
@@ -91,8 +92,14 @@ async def proxy_pass(
     if additional_headers:
         headers.update(additional_headers)
     
-    # Let httpx handle the host header and connection management
-    headers.pop("host", None)
+    if override_host:
+        # use the supplied host header
+        headers['host'] = override_host
+    else:
+        # Let httpx handle the host header 
+        headers.pop("host", None)
+
+    # Let httpx handle connection management    
     headers.pop("connection", None)
 
     client = None
