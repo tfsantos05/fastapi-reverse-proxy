@@ -13,11 +13,18 @@ from urllib.parse import urlparse
 
 logger = logging.getLogger("fastapi_reverse_proxy")
 
-# Hop-by-hop headers that should typically not be forwarded by a proxy
-# https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/TE
+# RFC 7230 §6.1 — hop-by-hop headers, strip on every proxied HTTP request/response
 EXCLUDED_HEADERS = {
-    "connection", "keep-alive", "proxy-authenticate", 
+    "connection", "keep-alive", "proxy-authenticate",
     "proxy-authorization", "te", "trailers", "transfer-encoding", "upgrade"
+}
+
+# WebSocket handshake headers — belong to ONE handshake (client<->you),
+# must not be reused for the separate handshake you<->target
+WS_HANDSHAKE_HEADERS = {
+    "connection", "upgrade", "host", "sec-websocket-key",
+    "sec-websocket-version", "sec-websocket-extensions",
+    "sec-websocket-protocol"
 }
 
 def url_normalize_ws(url:str):
@@ -101,6 +108,9 @@ async def proxy_pass(
 
     # Let httpx handle connection management    
     headers.pop("connection", None)
+
+    # Remove hop-to-hop headers
+    headers = {k: v for k, v in headers.items() if k.lower() not in EXCLUDED_HEADERS}
 
     client = None
     try:
@@ -225,6 +235,9 @@ async def proxy_pass_websocket(
 
     # Use subprotocols from scope if not provided explicitly
     supported_subprotocols = subprotocols or websocket.scope.get("subprotocols")
+
+    # Strip hop-to-hop headers
+    headers = {k: v for k, v in headers.items() if k.lower() not in WS_HANDSHAKE_HEADERS}
 
     try:
         # Determine the correct header parameter name for this version of websockets
