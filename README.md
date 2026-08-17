@@ -72,6 +72,7 @@ The `proxy_pass` function and `LoadBalancer.proxy_pass` provide deep customizati
 | `additional_headers` | `dict` | Append custom headers to the proxied request. |
 | `override_headers` | `dict` | Use these headers *instead* of original request headers. |
 | `forward_query` | `bool` | Whether to append the incoming query string (Default: `True`). |
+| `override_host` | `str` | Override the outbound `Host` header sent to the target (useful for multi-host/virtual-hosting backends that key off the original requested host). |
 
 ## Monitoring & Configuration
 
@@ -108,3 +109,50 @@ The library implements "deferred negotiation" for WebSockets:
 
 - **Termination Safety**: Resource cleanup (closing `httpx` clients and sockets) is triggered even on task cancellation (`BaseException`).
 - **Introspection-Based Compatibility**: Uses `inspect.signature` to automatically detect version-specific parameters in the `websockets` library.
+- **RFC 7230 Compliant Header Handling**: Hop-by-hop headers (`Connection`,
+  `Transfer-Encoding`, `TE`, `Trailers`, `Keep-Alive`, `Proxy-Authenticate`,
+  `Proxy-Authorization`) are stripped from both outbound requests and responses,
+  per spec. WebSocket handshake headers (`Sec-WebSocket-Key`, `Upgrade`, etc.)
+  from the client are never forwarded to the target, avoiding handshake collisions.
+
+
+
+## Running Behind a Reverse Proxy (Nginx/Apache)
+
+By default, `proxy_pass` and `proxy_pass_websocket` forward the client's original
+headers as-is — they do **not** set or rewrite `X-Real-IP`, `X-Forwarded-For`,
+`X-Forwarded-Proto`, or `X-Forwarded-Host`. If this library sits behind Nginx or
+Apache (the common setup), your upstream server is responsible for setting those
+headers before the request reaches this proxy:
+
+```nginx
+location / {
+    proxy_pass http://your-fastapi-app;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header Host $host;
+}
+```
+
+For WebSocket routes, Nginx also needs explicit upgrade handling:
+
+```nginx
+map $http_upgrade $connection_upgrade {
+    default upgrade;
+    ''      close;
+}
+
+location /ws/ {
+    proxy_pass http://your-fastapi-app;
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection $connection_upgrade;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+}
+```
+
+Without this configuration, `X-Forwarded-*` headers will be empty or missing by
+the time they reach your application.
