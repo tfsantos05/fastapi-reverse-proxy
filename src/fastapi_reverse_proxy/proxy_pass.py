@@ -256,6 +256,15 @@ async def proxy_pass_websocket(
             await websocket.accept(subprotocol=target_ws.subprotocol)
             await _handle_ws_bidirectional(websocket, target_ws)
 
+    except websockets.exceptions.InvalidStatus as e:
+        status = e.response.status_code
+        logger.error(f"WebSocket handshake rejected by upstream: {status}")
+        try:
+            raise HTTPException(status_code=status, detail=f"Upstream rejected WebSocket handshake: {status}")
+        except RuntimeError: # If already accepted, we can't raise HTTPException
+            pass
+        raise e
+
     except BaseException as e:
         if not isinstance(e, asyncio.CancelledError):
             # If the connection fails before accept(), we can raise a proper 502
