@@ -157,7 +157,7 @@ async def proxy_pass(
                 resp_headers[k] = v
             
             resp_headers["X-Accel-Buffering"] = "no"
-            resp_headers["Cache-Control"] = "no-cache"
+            #resp_headers["Cache-Control"] = "no-cache"
 
             async def cleanup():
                 await rp_resp.aclose()
