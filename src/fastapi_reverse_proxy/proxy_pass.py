@@ -79,14 +79,14 @@ async def proxy_pass(
         headers = dict(request.headers)
         # Identify the client's real IP and forward it
         client_host = request.client.host if request.client else "unknown"
-        headers["X-Real-IP"] = client_host
-        if "X-Forwarded-For" in headers:
-            headers["X-Forwarded-For"] = f"{headers['X-Forwarded-For']}, {client_host}"
-        else:
-            headers["X-Forwarded-For"] = client_host
+        #headers["X-Real-IP"] = client_host
+        #if "X-Forwarded-For" in headers:
+        #    headers["X-Forwarded-For"] = f"{headers['X-Forwarded-For']}, {client_host}"
+        #else:
+        #    headers["X-Forwarded-For"] = client_host
         
-        headers["X-Forwarded-Proto"] = request.url.scheme
-        headers["X-Forwarded-Host"] = headers.get("host", request.url.netloc)
+        #headers["X-Forwarded-Proto"] = request.url.scheme
+        #headers["X-Forwarded-Host"] = headers.get("host", request.url.netloc)
     
     # Apply additional headers
     if additional_headers:
@@ -212,12 +212,13 @@ async def proxy_pass_websocket(
         headers = dict(override_headers)
     else:
         client_host = websocket.client.host if websocket.client else "unknown"
-        headers = {
-            "X-Real-IP": client_host,
-            "X-Forwarded-For": client_host,
-            "X-Forwarded-Proto": websocket.url.scheme,
-            "X-Forwarded-Host": websocket.headers.get("host", websocket.url.netloc)
-        }
+        headers = dict(websocket.headers)
+        #headers = {
+        #    "X-Real-IP": client_host,
+        #    "X-Forwarded-For": client_host,
+        #   "X-Forwarded-Proto": websocket.url.scheme,
+        #    "X-Forwarded-Host": websocket.headers.get("host", websocket.url.netloc)
+        #}
     
     if additional_headers:
         headers.update(additional_headers)
