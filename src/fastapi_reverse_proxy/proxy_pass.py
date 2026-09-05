@@ -86,16 +86,6 @@ async def proxy_pass(
         headers = dict(override_headers)
     else:
         headers = dict(request.headers)
-        # Identify the client's real IP and forward it
-        client_host = request.client.host if request.client else "unknown"
-        #headers["X-Real-IP"] = client_host
-        #if "X-Forwarded-For" in headers:
-        #    headers["X-Forwarded-For"] = f"{headers['X-Forwarded-For']}, {client_host}"
-        #else:
-        #    headers["X-Forwarded-For"] = client_host
-        
-        #headers["X-Forwarded-Proto"] = request.url.scheme
-        #headers["X-Forwarded-Host"] = headers.get("host", request.url.netloc)
     
     # Apply additional headers
     if additional_headers:
