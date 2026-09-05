@@ -7,6 +7,7 @@ from url_normalize import url_normalize
 import httpx
 import websockets
 import asyncio
+import json
 import logging
 import inspect
 from typing import Optional
@@ -52,7 +53,7 @@ async def proxy_pass(
     forward_query: bool = True,
     additional_headers: Optional[dict] = None,
     override_headers: Optional[dict] = None,
-    override_body: Optional[bytes] = None,
+    override_body: Optional[bytes | list | dict | str] = None,
     method: Optional[str] = None,
     override_host: Optional[str] = None
 ):
@@ -119,7 +120,16 @@ async def proxy_pass(
     try:
         # Prepare content
         if override_body is not None:
-            content = override_body
+            if isinstance(override_body, (list, dict)):
+                # Stringify the JSON and convert to binary
+                content = json.dumps(override_body).encode()
+                # If no content type is set, set to JSON 
+                headers.setdefault("content-type","application/json")
+            elif isinstance(override_body, str): 
+                # Convert to binary if it's a string
+                content = override_body.encode()
+            else:
+                content = override_body
         else:
             # Stream the request body to the target (efficient for large uploads)
             async def request_generator():
