@@ -101,6 +101,9 @@ async def proxy_pass(
     # Let httpx handle connection management    
     headers.pop("connection", None)
 
+    # HTTPX should calculate this one automatically. No point in keeping it
+    headers.pop("content-length", None)
+
     # Remove hop-to-hop headers
     headers = {k: v for k, v in headers.items() if k.lower() not in EXCLUDED_HEADERS}
 
