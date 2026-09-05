@@ -145,9 +145,9 @@ async def proxy_pass(
                 if k.lower() == "content-length":
                     continue
                 resp_headers[k] = v
-            
+
+            # Prevents NGINX from buffering
             resp_headers["X-Accel-Buffering"] = "no"
-            #resp_headers["Cache-Control"] = "no-cache"
 
             async def cleanup():
                 await rp_resp.aclose()
