@@ -289,9 +289,12 @@ async def _handle_ws_bidirectional(websocket: WebSocket, target_ws):
                         await target_ws.send(message["bytes"])
                 elif message["type"] == "websocket.disconnect":
                     break
-        except (Exception, asyncio.CancelledError):
-            # Exit loop on error or cancellation
-            pass
+        # Exit the loop on error or in cancellation
+        except asyncio.CancelledError: pass  # Just cancelled, no error
+        except Exception as e:
+            # Log on Debug level
+            logger.debug(f"WS relay (client→target) ended: {e}")
+
 
     async def target_to_client():
         try:
@@ -301,9 +304,10 @@ async def _handle_ws_bidirectional(websocket: WebSocket, target_ws):
                     await websocket.send_text(message)
                 else:
                     await websocket.send_bytes(message)
-        except (Exception, asyncio.CancelledError, websockets.ConnectionClosed):
-            # Exit loop on error, closure, or cancellation
-            pass
+        except (asyncio.CancelledError, websockets.ConnectionClosed): pass # cancelled or close -> no error
+        except Exception as e:
+            # Log on Debug Level
+            logger.debug(f"WS relay (target→client) ended: {e}")
 
     # Wrap in tasks for cancellation
     tasks = [
