@@ -142,8 +142,6 @@ async def proxy_pass(
             for k, v in rp_resp.headers.items():
                 if k.lower() in EXCLUDED_HEADERS:
                     continue
-                if k.lower() == "content-encoding":
-                    continue
                 if k.lower() == "content-length":
                     continue
                 resp_headers[k] = v
@@ -157,7 +155,7 @@ async def proxy_pass(
                     await client.aclose()
 
             return StreamingResponse(
-                rp_resp.aiter_bytes(),
+                rp_resp.aiter_raw(),
                 status_code=rp_resp.status_code,
                 headers=resp_headers,
                 background=BackgroundTask(cleanup)
