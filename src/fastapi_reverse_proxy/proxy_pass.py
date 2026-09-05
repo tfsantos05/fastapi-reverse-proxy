@@ -1,4 +1,6 @@
-from fastapi import Request, WebSocket, Response, HTTPException
+from fastapi import Request, WebSocket, HTTPException, WebSocketException
+from fastapi import status as http_codes
+from fastapi.websockets import WebSocketState
 from fastapi.responses import StreamingResponse
 from starlette.background import BackgroundTask
 from url_normalize import url_normalize
@@ -221,14 +223,8 @@ async def proxy_pass_websocket(
     if override_headers is not None:
         headers = dict(override_headers)
     else:
-        client_host = websocket.client.host if websocket.client else "unknown"
+        #client_host = websocket.client.host if websocket.client else "unknown"
         headers = dict(websocket.headers)
-        #headers = {
-        #    "X-Real-IP": client_host,
-        #    "X-Forwarded-For": client_host,
-        #   "X-Forwarded-Proto": websocket.url.scheme,
-        #    "X-Forwarded-Host": websocket.headers.get("host", websocket.url.netloc)
-        #}
     
     if additional_headers:
         headers.update(additional_headers)
@@ -256,33 +252,28 @@ async def proxy_pass_websocket(
             await websocket.accept(subprotocol=target_ws.subprotocol)
             await _handle_ws_bidirectional(websocket, target_ws)
 
+        # Graceful close
+        if websocket.client_state == WebSocketState.CONNECTED:
+            await websocket.close()
+
     except websockets.exceptions.InvalidStatus as e:
         status = e.response.status_code
         logger.error(f"WebSocket handshake rejected by upstream: {status}")
-        try:
-            raise HTTPException(status_code=status, detail=f"Upstream rejected WebSocket handshake: {status}")
-        except RuntimeError: # If already accepted, we can't raise HTTPException
-            pass
-        raise e
+        raise WebSocketException(code=http_codes.WS_1008_POLICY_VIOLATION, reason=f"WebSocket handshake rejected by upstream: {status}"[:123])
 
     except BaseException as e:
         if not isinstance(e, asyncio.CancelledError):
-            # If the connection fails before accept(), we can raise a proper 502
-            if not websocket.client.connected: # Roughly checking if handshake finished
+            if websocket.client_state != WebSocketState.CONNECTED: # Roughly checking if handshake finished
                 logger.error(f"WebSocket Connection Error: {e}")
-                # This is a bit tricky in WS, but if we haven't accepted yet, we can raise
-                try:
-                    raise HTTPException(status_code=502, detail="Bad Gateway: WebSocket connection failed")
-                except RuntimeError: # If already accepted, we can't raise HTTPException
-                    pass
+                raise WebSocketException(code=http_codes.WS_1011_INTERNAL_ERROR, reason=f"Bad Gateway: {e}"[:123])
             else:
                 logger.error(f"WebSocket Proxy Error: {e}")
-        raise e
-    finally:
-        try:
-            await websocket.close()
-        except Exception:
-            pass
+                raise WebSocketException(code=http_codes.WS_1008_POLICY_VIOLATION, reason=f"WebSocket Proxy Error: {e}"[:123]) # max 123 byte
+        else: 
+            if websocket.client_state == WebSocketState.CONNECTED:
+                try: await websocket.close(code=http_codes.WS_1012_SERVICE_RESTART)
+                except: pass
+            raise e
 
 
 async def _handle_ws_bidirectional(websocket: WebSocket, target_ws):
