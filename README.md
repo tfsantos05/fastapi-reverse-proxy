@@ -68,7 +68,7 @@ The `proxy_pass` function and `LoadBalancer.proxy_pass` provide deep customizati
 | :--- | :--- | :--- |
 | `timeout` | `float` | Total request timeout in seconds (Default: `60.0`). |
 | `method` | `str` | Force a specific HTTP method (e.g., `"POST"`). |
-| `override_body` | `bytes` | Send custom data instead of the incoming request body. |
+| `override_body` | `bytes \| str \| dict \| list` | Use this instead of streaming the request body. `str` is UTF-8 encoded; `dict`/`list` are JSON-serialized automatically (automatically sets `Content-Type: application/json` if not already set). |
 | `additional_headers` | `dict` | Append custom headers to the proxied request. |
 | `override_headers` | `dict` | Use these headers *instead* of original request headers. |
 | `forward_query` | `bool` | Whether to append the incoming query string (Default: `True`). |
@@ -104,6 +104,8 @@ The library implements "deferred negotiation" for WebSockets:
 3. Once the upstream accepts a protocol, the proxy calls `websocket.accept(subprotocol=...)` back to the client.
 4. This ensures the entire tunnel (Client <-> Proxy <-> Upstream) uses the same negotiated protocol.
 5. **Handshake Timeout**: Supports a customizable `timeout` parameter (default `10.0s`) to prevent hangs if the backend is unresponsive.
+6. **Error Handling**: Raises `fastapi.WebSocketException` when the upstream connection fails or is rejected with proper WS codes such as 1008 or 1011
+7. **Debug**: Disruptions from either side are logged on debug level.
 
 ## Robustness & Safety
 
@@ -114,6 +116,14 @@ The library implements "deferred negotiation" for WebSockets:
   `Proxy-Authorization`) are stripped from both outbound requests and responses,
   per spec. WebSocket handshake headers (`Sec-WebSocket-Key`, `Upgrade`, etc.)
   from the client are never forwarded to the target, avoiding handshake collisions.
+- **Content-Length Safety**: Always stripped from the outbound request and
+  recalculated by `httpx` (or sent chunked when streaming), preventing
+  `LocalProtocolError` when `override_body` differs in size from the original
+  request.
+- **Content-Encoding Passthrough**: Compressed upstream responses (`gzip`, `br`,
+  etc.) are streamed back to the client raw via `aiter_raw()`, with
+  `Content-Encoding` preserved — the client decompresses it itself, avoiding
+  corrupted/garbled response bodies.
 
 
 
@@ -156,3 +166,12 @@ location /ws/ {
 
 Without this configuration, `X-Forwarded-*` headers will be empty or missing by
 the time they reach your application.
+
+
+### Streaming & Response Buffering
+
+`X-Accel-Buffering: no` is set automatically on every proxied response to
+disable Nginx's response buffering for streamed content (SSE, chunked
+transfers, large file downloads). If deploying behind Apache instead, disable
+buffering via your Apache config (`mod_proxy` directives) — there's no
+equivalent response header Apache recognizes.
