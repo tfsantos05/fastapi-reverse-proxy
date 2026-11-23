@@ -47,11 +47,39 @@ async def index(req: Request):
 
 ## 🛡️ Resilience & Error Handling
 
-Error Handlingfastapi-reverse-proxy transforms upstream crashes into meaningful HTTPException responses (e.g., 502 Bad Gateway or 504 Gateway Timeout). 
+fastapi-reverse-proxy transforms upstream crashes into meaningful HTTPException responses (e.g., 502 Bad Gateway or 504 Gateway Timeout).
 
 This allows you to implement custom failover logic, retry mechanisms, or specific error pages.
 
 For a full implementation of a primary-to-backup failover system, see the [example](https://github.com/tfsantos05/fastapi-reverse-proxy/tree/main/examples/02_http_errors.py).
+
+### Timeout behaviour
+
+Timeouts are configurable independently:
+
+- `request_timeout` is a hard deadline covering the upstream request (including streamed uploads), response headers, and the complete streamed response. It is disabled by default.
+- `connect_timeout` limits connection establishment.
+- `read_timeout` limits how long the proxy waits for the next piece of upstream response data. For streaming APIs (LLM token streams, SSE, etc.), this is an inactivity timeout between chunks — it does not limit the total generation time as long as data keeps arriving.
+- `write_timeout` limits how long sending request data may take.
+- `pool_timeout` limits how long the request waits for an available connection from the HTTPX pool.
+- Each phase timeout defaults to `60.0` seconds; set an individual value to `None` to disable that phase timeout.
+
+The old `timeout` parameter remains supported but is deprecated. It acts as a compatibility alias for all four HTTPX phase timeouts: a non-default value applies to phases still set to their defaults, while explicit phase-specific values take priority. Passing `timeout=None` disables the default phase timeouts unless an explicit phase value overrides it. Prefer the explicit phase parameters for new code.
+
+Example for a local LLM server:
+
+```python
+return await proxy_pass(
+    req,
+    "http://127.0.0.1:8080",
+    request_timeout=900.0,  # Maximum total request duration: 15 minutes
+    read_timeout=120.0,     # Abort after 2 minutes without upstream data
+)
+```
+
+For an indefinitely long-lived stream that should only time out when the upstream stops sending data, set `request_timeout=None` and configure `read_timeout` instead. Set an individual phase timeout to `None` to disable it.
+
+A timeout before response headers are sent can be returned as HTTP 504 Gateway Timeout. Once streaming headers have been sent, the HTTP status cannot be changed; the proxy terminates the stream and closes the upstream response instead.
 
 ## Advanced Examples:
 
@@ -66,7 +94,12 @@ The `proxy_pass` function and `LoadBalancer.proxy_pass` provide deep customizati
 
 | Parameter | Type | Description |
 | :--- | :--- | :--- |
-| `timeout` | `float` | Total request timeout in seconds (Default: `60.0`). |
+| `request_timeout` | `float \| None` | Hard deadline in seconds for the complete proxied request, including response streaming. Default: `None` (unlimited). |
+| `connect_timeout` | `float \| None` | Connection establishment timeout. Default: `60.0`; `None` disables it. |
+| `read_timeout` | `float \| None` | Maximum wait for upstream response data. Default: `60.0`; `None` disables it. |
+| `write_timeout` | `float \| None` | Maximum time to send request data upstream. Default: `60.0`; `None` disables it. |
+| `pool_timeout` | `float \| None` | Maximum wait for an available HTTPX pool connection. Default: `60.0`; `None` disables it. |
+| `timeout` | `float \| None` | Deprecated compatibility alias for all HTTPX phase timeouts. |
 | `method` | `str` | Force a specific HTTP method (e.g., `"POST"`). |
 | `override_body` | `bytes \| str \| dict \| list` | Use this instead of streaming the request body. `str` is UTF-8 encoded; `dict`/`list` are JSON-serialized automatically (automatically sets `Content-Type: application/json` if not already set). |
 | `additional_headers` | `dict` | Append custom headers to the proxied request. |
