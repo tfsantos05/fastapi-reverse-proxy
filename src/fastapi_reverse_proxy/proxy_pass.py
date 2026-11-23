@@ -13,6 +13,7 @@ import inspect
 from typing import Optional
 from .proxy_httpx import get_httpx_client
 from urllib.parse import urlparse
+import warnings
 
 logger = logging.getLogger("fastapi_reverse_proxy")
 
@@ -49,13 +50,18 @@ async def proxy_pass(
     request: Request, 
     host: str,
     path: Optional[str] = None,
-    timeout: float = 60.0, 
+    timeout: Optional[float] = None, # DEPRECATED!
     forward_query: bool = True,
     additional_headers: Optional[dict] = None,
     override_headers: Optional[dict] = None,
     override_body: Optional[bytes | list | dict | str] = None,
     method: Optional[str] = None,
-    override_host: Optional[str] = None
+    override_host: Optional[str] = None,
+    request_timeout: Optional[float] = None,
+    connect_timeout: Optional[float] = 60.0,
+    read_timeout: Optional[float] = 60.0,
+    write_timeout: Optional[float] = 60.0,
+    pool_timeout: Optional[float] = 60.0
 ):
     """
     Forwards incoming HTTP requests to the target service using streaming.
@@ -66,7 +72,21 @@ async def proxy_pass(
     - override_headers: Use these headers instead of original request headers.
     - override_body: Use this body instead of streaming the request body.
     - method: HTTP method to use (e.g., 'POST'). Defaults to original request method.
+    - request_timeout: Optional hard deadline for the complete request, including response streaming.
+    - connect_timeout: Maximum time to establish the upstream connection.
+    - read_timeout: Maximum time to wait for upstream response data.
+    - write_timeout: Maximum time to send request data to the upstream.
+    - pool_timeout: Maximum time to wait for an available connection from the HTTPX pool.
+    - timeout: DEPRECATED!  legacy alias for all HTTPX phase timeouts.
     """
+
+    if timeout is not None:
+        warnings.warn(
+            "'timeout' is deprecated; use 'connect_timeout', "
+            "'read_timeout', 'write_timeout' and 'pool_timeout' instead.",
+            DeprecationWarning,
+            stacklevel=2
+        )
     
     if path is None: path = request.url.path # set to path
     
@@ -108,6 +128,37 @@ async def proxy_pass(
     # Remove hop-to-hop headers
     headers = {k: v for k, v in headers.items() if k.lower() not in EXCLUDED_HEADERS}
 
+    phase_timeouts = {
+        "connect_timeout": connect_timeout,
+        "read_timeout": read_timeout,
+        "write_timeout": write_timeout,
+        "pool_timeout": pool_timeout,
+    }
+    for name, value in (
+        ("request_timeout", request_timeout),
+        ("timeout", timeout),
+        *phase_timeouts.items(),
+    ):
+        if value is not None and value <= 0:
+            raise ValueError(f"{name} must be greater than 0 or None")
+
+    # Deprecated legacy timeout: when provided, it overrides phase defaults.
+    # Explicit phase-specific values take priority. None leaves phase timeouts unchanged.
+    if timeout is not None:
+        phase_timeouts = {
+            name: (value if value != 60.0 else timeout)
+            for name, value in phase_timeouts.items()
+        }
+
+    upstream_timeout = httpx.Timeout(
+        connect=phase_timeouts["connect_timeout"],
+        read=phase_timeouts["read_timeout"],
+        write=phase_timeouts["write_timeout"],
+        pool=phase_timeouts["pool_timeout"],
+    )
+
+    deadline = anyio.current_time() + request_timeout if request_timeout is not None else None
+
     client = None
     try:
         client = await get_httpx_client(request)
@@ -143,11 +194,16 @@ async def proxy_pass(
             url=url,
             headers=headers,
             content=content,
-            timeout=timeout
+            timeout=upstream_timeout
         )
 
-        # Send the request and stream the response
-        rp_resp = await client.send(rp_req, stream=True)
+        # The deadline starts before sending the upstream request and remains
+        # active while the response body is streamed to the downstream client.
+        if deadline is None:
+            rp_resp = await client.send(rp_req, stream=True)
+        else:
+            with anyio.fail_after(max(0, deadline - anyio.current_time())):
+                rp_resp = await client.send(rp_req, stream=True)
 
         try:
             # Filter response headers
@@ -162,13 +218,43 @@ async def proxy_pass(
             # Prevents NGINX from buffering
             resp_headers["X-Accel-Buffering"] = "no"
 
+            cleaned_up = False
+
             async def cleanup():
-                await rp_resp.aclose()
-                if not is_global_client:
-                    await client.aclose()
+                nonlocal cleaned_up
+                if cleaned_up:
+                    return
+                cleaned_up = True
+                try:
+                    await rp_resp.aclose()
+                finally:
+                    if not is_global_client:
+                        await client.aclose()
+
+            async def response_stream():
+                try:
+                    if deadline is None:
+                        async for chunk in rp_resp.aiter_raw():
+                            yield chunk
+                    else:
+                        remaining = deadline - anyio.current_time()
+                        with anyio.fail_after(max(0, remaining)):
+                            async for chunk in rp_resp.aiter_raw():
+                                yield chunk
+                except (TimeoutError, httpx.TimeoutException):
+                    logger.warning("Upstream response stream timed out")
+                    raise
+                except Exception:
+                    logger.exception("Upstream response stream failed")
+                    raise
+                finally:
+                    # BackgroundTask does not run when streaming raises, so
+                    # cleanup must also happen in the iterator itself.
+                    with anyio.CancelScope(shield=True):
+                        await cleanup()
 
             return StreamingResponse(
-                rp_resp.aiter_raw(),
+                response_stream(),
                 status_code=rp_resp.status_code,
                 headers=resp_headers,
                 background=BackgroundTask(cleanup)
