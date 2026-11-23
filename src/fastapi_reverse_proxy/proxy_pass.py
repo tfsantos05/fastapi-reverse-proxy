@@ -5,6 +5,7 @@ from fastapi.responses import StreamingResponse
 from starlette.background import BackgroundTask
 from url_normalize import url_normalize
 import httpx
+import anyio
 import websockets
 import asyncio
 import json
@@ -37,12 +38,10 @@ def url_normalize_ws(url:str):
 
 async def handle_proxy_exception(e: Exception):
     """Maps internal exceptions to FastAPI HTTPExceptions for the client."""
-    if isinstance(e, httpx.ConnectTimeout):
+    if isinstance(e, (httpx.TimeoutException, TimeoutError)):
         raise HTTPException(status_code=504, detail="Gateway Timeout")
     if isinstance(e, (httpx.ConnectError, httpx.RemoteProtocolError)):
         raise HTTPException(status_code=502, detail="Bad Gateway")
-    if isinstance(e, httpx.ReadTimeout):
-        raise HTTPException(status_code=504, detail="Upstream Read Timeout")
     # Re-raise other exceptions (like CancelledError or internal bugs) to avoid masking
     raise e
     
