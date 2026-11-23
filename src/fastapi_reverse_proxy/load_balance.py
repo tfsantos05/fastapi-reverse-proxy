@@ -110,12 +110,7 @@ class LoadBalancer:
         self, 
         req: Request, 
         path: str, 
-        timeout: float = 60.0, 
-        forward_query: bool = True,
-        additional_headers: Optional[dict] = None,
-        override_headers: Optional[dict] = None,
-        override_body: Optional[bytes] = None,
-        method: Optional[str] = None
+        **proxy_args
     ):
         from .proxy_pass import proxy_pass as _proxy_pass  # Late import
         
@@ -132,22 +127,14 @@ class LoadBalancer:
             request=req, 
             host=url_normalize(target, default_scheme="http"),
             path=path,
-            timeout=timeout, 
-            forward_query=forward_query,
-            additional_headers=additional_headers,
-            override_headers=override_headers,
-            override_body=override_body,
-            method=method
+            **proxy_args
         )
 
     async def proxy_pass_websocket(
         self, 
         websocket: WebSocket, 
         path: Optional[str] = None, 
-        subprotocols: list[str] | None = None, 
-        forward_query: bool = True,
-        additional_headers: Optional[dict] = None,
-        override_headers: Optional[dict] = None
+        **proxy_args
     ):
         from .proxy_pass import proxy_pass_websocket as _proxy_pass_ws  # Late import
         
@@ -164,9 +151,6 @@ class LoadBalancer:
             websocket, 
             host=origin,
             path=path,
-            subprotocols=subprotocols, 
-            forward_query=forward_query,
-            additional_headers=additional_headers,
-            override_headers=override_headers
+            **proxy_args
         )
 
